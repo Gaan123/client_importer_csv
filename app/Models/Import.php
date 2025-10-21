@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ImportStatus;
 use Illuminate\Database\Eloquent\Model;
 
 class Import extends Model
@@ -19,6 +20,7 @@ class Import extends Model
     ];
 
     protected $casts = [
+        'status' => ImportStatus::class,
         'metadata' => 'array',
         'data' => 'array',
     ];
