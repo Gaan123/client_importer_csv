@@ -213,7 +213,7 @@ class ImportService
 
         return Import::create([
             'importable_type' => $importableType,
-            'file_signature' => $signature,
+            'file_signature' => $signature, // For large files: temp signature; small files: full hash
             'file_path' => $filePath,
             'status' => ImportStatus::PENDING,
             'total_rows' => 0,
