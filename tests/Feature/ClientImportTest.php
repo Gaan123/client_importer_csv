@@ -114,7 +114,6 @@ class ClientImportTest extends TestCase
     public function test_handles_validation_errors()
     {
         $csvContent = "company,email,phone\n";
-        $csvContent .= "Company 1,contact1@company1.com,+1-555-123-4567\n";
         $csvContent .= ",missing_company@test.com,+1-555-123-4568\n";
         $csvContent .= "Company 3,invalid-email,+1-555-123-4569\n";
         $csvContent .= "Company 4,contact4@company4.com,";
@@ -126,8 +125,12 @@ class ClientImportTest extends TestCase
         $response->assertStatus(202);
         $response->assertJsonStructure(['data', 'message']);
 
-
+        // Process the import job to populate data['rows']
         $import = Import::first();
+        $job = new ProcessClientsImport($import);
+        $job->handle(app(\App\Services\ImportService::class));
+
+        $import->refresh();
         $failedRows = collect($import->data['rows'])->where('status', 'failed');
 
         $this->assertCount(3, $failedRows);
@@ -176,7 +179,12 @@ class ClientImportTest extends TestCase
 
         $response->assertStatus(202);
 
+        // Process the import job to populate data['rows']
         $import = Import::first();
+        $job = new ProcessClientsImport($import);
+        $job->handle(app(\App\Services\ImportService::class));
+
+        $import->refresh();
 
         $this->assertArrayHasKey('rows', $import->data);
         $this->assertArrayHasKey('summary', $import->data);

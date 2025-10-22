@@ -109,6 +109,7 @@ class ProcessClientsImport implements ShouldQueue
         $this->import->update([
             'status' => ImportStatus::PROCESSING_CHUNKS,
             'data' => array_merge($this->import->data, [
+                'rows' => [], // Initialize empty rows array for storing processed data
                 'summary' => [
                     'imported' => 0,
                     'failed' => 0,

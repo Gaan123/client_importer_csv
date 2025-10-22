@@ -91,7 +91,22 @@ class ProcessChunkedClientsImport implements ShouldQueue
                 'duplicates' => 0,
             ];
 
+            $processedRows = [];
+            $rowNumber = ($this->chunkIndex * 10000) + 1; // Estimate row numbers based on chunk index
+
             foreach ($rows as $row) {
+                $rowData = [
+                    'row_number' => $rowNumber,
+                    'data' => [
+                        'company' => $row['company'] ?? '',
+                        'email' => $row['email'] ?? '',
+                        'phone' => $row['phone'] ?? '',
+                    ],
+                    'is_duplicate' => false,
+                    'status' => 'pending',
+                    'error' => null,
+                ];
+
                 try {
                     DB::table('clients')->insert([
                         'company' => $row['company'] ?? '',
@@ -104,6 +119,7 @@ class ProcessChunkedClientsImport implements ShouldQueue
                     ]);
 
                     $stats['imported']++;
+                    $rowData['status'] = 'success';
 
                 } catch (\Exception $e) {
                     $stats['failed']++;
@@ -112,11 +128,19 @@ class ProcessChunkedClientsImport implements ShouldQueue
 
                     if ($isDuplicate) {
                         $stats['duplicates']++;
+                        $rowData['is_duplicate'] = true;
+                        $rowData['error'] = 'Duplicate entry: A client with this company, email, and phone combination already exists.';
+                    } else {
+                        $rowData['error'] = $e->getMessage();
                     }
+                    $rowData['status'] = 'failed';
                 }
+
+                $processedRows[] = $rowData;
+                $rowNumber++;
             }
 
-            $this->updateChunkStats($stats);
+            $this->updateChunkStats($stats, $processedRows);
 
             Log::info("Chunk {$this->chunkIndex} completed: Imported={$stats['imported']}, Failed={$stats['failed']}, Duplicates={$stats['duplicates']}");
 
@@ -126,9 +150,9 @@ class ProcessChunkedClientsImport implements ShouldQueue
         }
     }
 
-    protected function updateChunkStats(array $stats): void
+    protected function updateChunkStats(array $stats, array $processedRows): void
     {
-        DB::transaction(function () use ($stats) {
+        DB::transaction(function () use ($stats, $processedRows) {
             // Append chunk index to array: || operator concatenates JSONB arrays
             DB::statement(
                 "UPDATE imports
@@ -160,6 +184,19 @@ class ProcessChunkedClientsImport implements ShouldQueue
                  )
                  WHERE id = ?",
                 [$stats['imported'], $stats['failed'], $stats['duplicates'], $this->importId]
+            );
+
+            // Append processed rows to the rows array in data JSON
+            // This stores all row details (failed and succeeded) for large files
+            DB::statement(
+                "UPDATE imports
+                 SET data = jsonb_set(
+                     COALESCE(data, '{}'::jsonb),
+                     '{rows}',
+                     (COALESCE(data->'rows', '[]'::jsonb) || ?::jsonb)
+                 )
+                 WHERE id = ?",
+                [json_encode($processedRows), $this->importId]
             );
         });
     }

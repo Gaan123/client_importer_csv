@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ImportStatus;
+use App\Jobs\DetectClientDuplicates;
 use App\Models\Import;
 use App\Imports\ClientsImport;
 use Illuminate\Http\UploadedFile;
@@ -260,6 +261,12 @@ class ImportService
                     ],
                 ],
             ]);
+
+            if ($status->isSuccessful()) {
+                DetectClientDuplicates::dispatch($import->id)
+                    ->onQueue('imports')
+                    ->delay(now()->addSeconds(5));
+            }
 
             return [
                 'success' => true,

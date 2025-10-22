@@ -116,6 +116,11 @@ class FinalizeChunkedImport implements ShouldQueue
             if ($status->isSuccessful()) {
                 $this->cleanupChunkFiles();
                 $this->cleanupOriginalCsv();
+
+                // Dispatch duplicate detection job
+                DetectClientDuplicates::dispatch($this->importId)
+                    ->onQueue('imports')
+                    ->delay(now()->addSeconds(5));
             }
 
         } catch (\Exception $e) {

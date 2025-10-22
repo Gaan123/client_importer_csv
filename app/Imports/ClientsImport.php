@@ -44,13 +44,17 @@ class ClientsImport implements
         ];
 
         try {
-            $client = Clients::create([
-                'company' => $row['company'] ?? null,
-                'email' => $row['email'] ?? null,
-                'phone' => $row['phone'] ?? null,
-                'has_duplicates' =>  false,
-                'extras' => null,
-            ]);
+            // Use savepoint to prevent transaction abort in PostgreSQL
+            // If this insert fails, only this savepoint rolls back, not the entire transaction
+            DB::transaction(function () use ($row) {
+                Clients::create([
+                    'company' => $row['company'] ?? null,
+                    'email' => $row['email'] ?? null,
+                    'phone' => $row['phone'] ?? null,
+                    'has_duplicates' =>  false,
+                    'extras' => null,
+                ]);
+            });
 
             $rowData['status'] = 'success';
             $rowData['is_duplicate'] = false;
@@ -76,6 +80,11 @@ class ClientsImport implements
                 $rowData['error'] = $e->getMessage();
                 $this->failedCount++;
             }
+        } catch (\Throwable $e) {
+            $rowData['status'] = 'failed';
+            $rowData['is_duplicate'] = false;
+            $rowData['error'] = $e->getMessage();
+            $this->failedCount++;
         }
 
         $this->allRows[] = $rowData;
