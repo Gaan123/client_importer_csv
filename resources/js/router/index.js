@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import Login from '../views/Login.vue';
 import Clients from '../views/Clients.vue';
+import ClientDuplicates from '../views/ClientDuplicates.vue';
 
 const routes = [
   {
@@ -19,6 +20,12 @@ const routes = [
     path: '/clients',
     name: 'clients',
     component: Clients,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/clients/:id/duplicates',
+    name: 'client-duplicates',
+    component: ClientDuplicates,
     meta: { requiresAuth: true }
   }
 ];
