@@ -1,5 +1,12 @@
 <template>
   <div class="min-h-screen bg-gray-100">
+    <ConfirmDialog></ConfirmDialog>
+    <ClientFormModal
+      v-model:visible="showClientDialog"
+      :client="selectedClient"
+      @saved="handleClientSaved"
+    />
+
     <div class="bg-white shadow">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center py-4">
@@ -122,6 +129,26 @@
                 </div>
               </template>
             </Column>
+            <Column header="Actions" style="width: 12rem">
+              <template #body="slotProps">
+                <div class="flex gap-2">
+                  <Button
+                    label="Edit"
+                    icon="pi pi-pencil"
+                    size="small"
+                    severity="info"
+                    @click="openEditDialog(slotProps.data)"
+                  />
+                  <Button
+                    label="Delete"
+                    icon="pi pi-trash"
+                    size="small"
+                    severity="danger"
+                    @click="confirmDelete(slotProps.data)"
+                  />
+                </div>
+              </template>
+            </Column>
 
             <template #empty>
               <div class="text-center py-4">No duplicates found.</div>
@@ -137,16 +164,20 @@
 import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useConfirm } from 'primevue/useconfirm';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Button from 'primevue/button';
 import Card from 'primevue/card';
 import Tag from 'primevue/tag';
+import ConfirmDialog from 'primevue/confirmdialog';
+import ClientFormModal from '../components/ClientFormModal.vue';
 import axios from 'axios';
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const confirm = useConfirm();
 
 const originalClient = ref(null);
 const duplicates = ref([]);
@@ -156,6 +187,9 @@ const duplicateIds = ref({
   email: [],
   phone: []
 });
+
+const showClientDialog = ref(false);
+const selectedClient = ref(null);
 
 const fetchDuplicates = async () => {
   loading.value = true;
@@ -191,6 +225,37 @@ const getCellClass = (clientId, type) => {
     if (type === 'phone') return 'bg-green-200 border border-green-400';
   }
   return '';
+};
+
+const openEditDialog = (client) => {
+  selectedClient.value = client;
+  showClientDialog.value = true;
+};
+
+const handleClientSaved = () => {
+  fetchDuplicates();
+};
+
+const confirmDelete = (client) => {
+  confirm.require({
+    message: `Are you sure you want to delete ${client.company}?`,
+    header: 'Delete Confirmation',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: 'Cancel',
+    acceptLabel: 'Delete',
+    accept: () => {
+      deleteClient(client.id);
+    }
+  });
+};
+
+const deleteClient = async (clientId) => {
+  try {
+    await axios.delete(`/api/clients/${clientId}`);
+    duplicates.value = duplicates.value.filter(c => c.id !== clientId);
+  } catch (error) {
+    console.error('Error deleting client:', error);
+  }
 };
 
 const goBack = () => {

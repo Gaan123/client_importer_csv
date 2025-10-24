@@ -1,12 +1,20 @@
 <template>
   <div class="min-h-screen bg-gray-100">
     <ConfirmDialog></ConfirmDialog>
+    <ClientFormModal
+      v-model:visible="showClientDialog"
+      :client="selectedClient"
+      @saved="handleClientSaved"
+    />
 
     <div class="bg-white shadow">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center py-4">
           <h1 class="text-2xl font-bold">Clients</h1>
-          <Button label="Logout" icon="pi pi-sign-out" @click="handleLogout" severity="secondary" />
+          <div class="flex gap-2">
+            <Button label="Create Client" icon="pi pi-plus" @click="openCreateDialog" />
+            <Button label="Logout" icon="pi pi-sign-out" @click="handleLogout" severity="secondary" />
+          </div>
         </div>
       </div>
     </div>
@@ -53,7 +61,6 @@
             <Column field="company" header="Company" sortable></Column>
             <Column field="email" header="Email" sortable></Column>
             <Column field="phone" header="Phone" sortable></Column>
-            <Column field="address" header="Address" sortable></Column>
             <Column field="has_duplicates" header="Duplicates" sortable style="width: 8rem">
               <template #body="slotProps">
                 <Tag
@@ -65,7 +72,7 @@
                 <Tag v-else severity="success" value="No" icon="pi pi-check" />
               </template>
             </Column>
-            <Column header="Actions" style="width: 15rem">
+            <Column header="Actions" style="width: 20rem">
               <template #body="slotProps">
                 <div class="flex gap-2">
                   <Button
@@ -74,6 +81,13 @@
                     icon="pi pi-eye"
                     size="small"
                     @click="viewDuplicates(slotProps.data.id)"
+                  />
+                  <Button
+                    label="Edit"
+                    icon="pi pi-pencil"
+                    size="small"
+                    severity="info"
+                    @click="openEditDialog(slotProps.data)"
                   />
                   <Button
                     label="Delete"
@@ -112,6 +126,7 @@ import IconField from 'primevue/iconfield';
 import InputIcon from 'primevue/inputicon';
 import ConfirmDialog from 'primevue/confirmdialog';
 import Checkbox from 'primevue/checkbox';
+import ClientFormModal from '../components/ClientFormModal.vue';
 import axios from 'axios';
 
 const router = useRouter();
@@ -129,6 +144,9 @@ const filters = ref({
   company: { value: null, matchMode: FilterMatchMode.CONTAINS },
   email: { value: null, matchMode: FilterMatchMode.CONTAINS },
 });
+
+const showClientDialog = ref(false);
+const selectedClient = ref(null);
 
 const fetchClients = async (page = 1, rows = 10) => {
   loading.value = true;
@@ -191,9 +209,24 @@ const deleteClient = async (clientId) => {
   try {
     await axios.delete(`/api/clients/${clientId}`);
     clients.value = clients.value.filter(c => c.id !== clientId);
+    totalRecords.value--;
   } catch (error) {
     console.error('Error deleting client:', error);
   }
+};
+
+const openCreateDialog = () => {
+  selectedClient.value = null;
+  showClientDialog.value = true;
+};
+
+const openEditDialog = (client) => {
+  selectedClient.value = client;
+  showClientDialog.value = true;
+};
+
+const handleClientSaved = (data) => {
+  fetchClients(currentPage.value, perPage.value);
 };
 
 const handleLogout = async () => {
