@@ -50,8 +50,8 @@ class ImportsController extends Controller
     {
         $perPage = $request->get('per_page', 15);
         $page = $request->get('page', 1);
-        $type = $request->get('type'); // 'failed' or 'success'
-        $isDuplicate = $request->get('is_duplicate'); // 'true', 'false', or null
+        $status = $request->get('status');
+        $isDuplicate = $request->get('is_duplicate');
         $offset = ($page - 1) * $perPage;
 
         // Get import metadata WITHOUT loading the data column
@@ -69,9 +69,9 @@ class ImportsController extends Controller
 
         // Build WHERE clause for status filtering
         $statusFilter = '';
-        if ($type === 'failed') {
+        if ($status === 'failed') {
             $statusFilter = "AND row->>'status' = 'failed'";
-        } elseif ($type === 'success') {
+        } elseif ($status === 'success') {
             $statusFilter = "AND row->>'status' = 'success'";
         }
 

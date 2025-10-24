@@ -349,4 +349,193 @@ class ClientsCrudApiTest extends TestCase
 
         $response->assertStatus(401);
     }
+
+    public function test_can_get_duplicates_for_client()
+    {
+        $client2 = Clients::factory()->create([
+            'company' => 'Acme Corp',
+            'email' => 'other@company.com',
+            'phone' => '+1-555-9999',
+        ]);
+
+        $client3 = Clients::factory()->create([
+            'company' => 'Acme Corp',
+            'email' => 'another@company.com',
+            'phone' => '+1-555-8888',
+        ]);
+
+        $client4 = Clients::factory()->create([
+            'company' => 'Other Corp',
+            'email' => 'test@acme.com',
+            'phone' => '+1-555-7777',
+        ]);
+
+        $client1 = Clients::factory()->create([
+            'company' => 'Acme Corp',
+            'email' => 'test@acme.com',
+            'phone' => '+1-555-1234',
+            'has_duplicates' => true,
+            'extras' => [
+                'duplicate_ids' => [
+                    'company' => [$client2->id, $client3->id],
+                    'email' => [$client4->id],
+                ]
+            ],
+        ]);
+
+        $response = $this->getJson("/api/clients/{$client1->id}/duplicates");
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure([
+            'message',
+            'original_client' => ['id', 'company', 'email', 'phone', 'has_duplicates', 'extras'],
+            'data' => [
+                '*' => ['id', 'company', 'email', 'phone', 'has_duplicates', 'extras']
+            ],
+        ]);
+
+        $response->assertJsonPath('original_client.id', $client1->id);
+        $response->assertJsonCount(3, 'data');
+
+        $duplicateIds = array_column($response->json('data'), 'id');
+        $this->assertContains($client2->id, $duplicateIds);
+        $this->assertContains($client3->id, $duplicateIds);
+        $this->assertContains($client4->id, $duplicateIds);
+    }
+
+    public function test_duplicates_endpoint_returns_empty_for_client_without_duplicates()
+    {
+        $client = Clients::factory()->create([
+            'company' => 'Unique Corp',
+            'email' => 'unique@company.com',
+            'phone' => '+1-555-0000',
+            'has_duplicates' => false,
+            'extras' => null,
+        ]);
+
+        $response = $this->getJson("/api/clients/{$client->id}/duplicates");
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'message' => 'This client has no duplicates.',
+            'data' => []
+        ]);
+    }
+
+    public function test_duplicate_detection_finds_company_duplicates()
+    {
+        $client1 = Clients::factory()->create([
+            'company' => 'Test Company',
+            'email' => 'test1@example.com',
+            'phone' => '+1-555-1111',
+        ]);
+
+        $client2 = Clients::factory()->create([
+            'company' => 'Test Company',
+            'email' => 'test2@example.com',
+            'phone' => '+1-555-2222',
+        ]);
+
+        $job = new \App\Jobs\DetectSingleClientDuplicate($client1->id);
+        $job->handle();
+
+        $client1->refresh();
+
+        $this->assertTrue($client1->has_duplicates);
+        $this->assertNotNull($client1->extras);
+        $this->assertArrayHasKey('duplicate_ids', $client1->extras);
+        $this->assertArrayHasKey('company', $client1->extras['duplicate_ids']);
+        $this->assertContains($client2->id, $client1->extras['duplicate_ids']['company']);
+    }
+
+    public function test_duplicate_detection_finds_email_duplicates()
+    {
+        $client1 = Clients::factory()->create([
+            'company' => 'Company A',
+            'email' => 'shared@example.com',
+            'phone' => '+1-555-1111',
+        ]);
+
+        $client2 = Clients::factory()->create([
+            'company' => 'Company B',
+            'email' => 'shared@example.com',
+            'phone' => '+1-555-2222',
+        ]);
+
+        $job = new \App\Jobs\DetectSingleClientDuplicate($client1->id);
+        $job->handle();
+
+        $client1->refresh();
+
+        $this->assertTrue($client1->has_duplicates);
+        $this->assertArrayHasKey('email', $client1->extras['duplicate_ids']);
+        $this->assertContains($client2->id, $client1->extras['duplicate_ids']['email']);
+    }
+
+    public function test_duplicate_detection_finds_phone_duplicates()
+    {
+        $client1 = Clients::factory()->create([
+            'company' => 'Company A',
+            'email' => 'test1@example.com',
+            'phone' => '+1-555-9999',
+        ]);
+
+        $client2 = Clients::factory()->create([
+            'company' => 'Company B',
+            'email' => 'test2@example.com',
+            'phone' => '+1-555-9999',
+        ]);
+
+        $job = new \App\Jobs\DetectSingleClientDuplicate($client1->id);
+        $job->handle();
+
+        $client1->refresh();
+
+        $this->assertTrue($client1->has_duplicates);
+        $this->assertArrayHasKey('phone', $client1->extras['duplicate_ids']);
+        $this->assertContains($client2->id, $client1->extras['duplicate_ids']['phone']);
+    }
+
+    public function test_duplicate_detection_updates_related_clients()
+    {
+        $client1 = Clients::factory()->create([
+            'company' => 'Shared Company',
+            'email' => 'test1@example.com',
+            'phone' => '+1-555-1111',
+        ]);
+
+        $client2 = Clients::factory()->create([
+            'company' => 'Shared Company',
+            'email' => 'test2@example.com',
+            'phone' => '+1-555-2222',
+        ]);
+
+        $job = new \App\Jobs\DetectSingleClientDuplicate($client1->id);
+        $job->handle();
+
+        $client2->refresh();
+
+        $this->assertTrue($client2->has_duplicates);
+        $this->assertNotNull($client2->extras);
+        $this->assertArrayHasKey('duplicate_ids', $client2->extras);
+        $this->assertArrayHasKey('company', $client2->extras['duplicate_ids']);
+        $this->assertContains($client1->id, $client2->extras['duplicate_ids']['company']);
+    }
+
+    public function test_duplicate_detection_handles_no_duplicates()
+    {
+        $client = Clients::factory()->create([
+            'company' => 'Unique Company',
+            'email' => 'unique@example.com',
+            'phone' => '+1-555-0000',
+        ]);
+
+        $job = new \App\Jobs\DetectSingleClientDuplicate($client->id);
+        $job->handle();
+
+        $client->refresh();
+
+        $this->assertFalse($client->has_duplicates);
+        $this->assertNull($client->extras);
+    }
 }
