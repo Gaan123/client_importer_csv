@@ -91,6 +91,39 @@ class ClientsController extends Controller
         return new ClientResource($client);
     }
 
+    public function duplicates(Clients $client)
+    {
+        if (!$client->has_duplicates || !$client->extras || !isset($client->extras['duplicate_ids'])) {
+            return response()->json([
+                'message' => 'This client has no duplicates.',
+                'data' => []
+            ]);
+        }
+
+        $duplicateIds = $client->extras['duplicate_ids'];
+        $allDuplicateIds = [];
+
+        if (isset($duplicateIds['company'])) {
+            $allDuplicateIds = array_merge($allDuplicateIds, $duplicateIds['company']);
+        }
+        if (isset($duplicateIds['email'])) {
+            $allDuplicateIds = array_merge($allDuplicateIds, $duplicateIds['email']);
+        }
+        if (isset($duplicateIds['phone'])) {
+            $allDuplicateIds = array_merge($allDuplicateIds, $duplicateIds['phone']);
+        }
+
+        $allDuplicateIds = array_unique($allDuplicateIds);
+
+        $duplicates = Clients::whereIn('id', $allDuplicateIds)->get();
+
+        return ClientResource::collection($duplicates)
+            ->additional([
+                'message' => 'Duplicates retrieved successfully.',
+                'original_client' => new ClientResource($client)
+            ]);
+    }
+
     public function update(UpdateClientRequest $request, Clients $client)
     {
         try {
