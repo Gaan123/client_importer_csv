@@ -94,51 +94,8 @@ class ProcessChunkedClientsImport implements ShouldQueue
             $processedRows = [];
             $rowNumber = ($this->chunkIndex * 10000) + 1; // Estimate row numbers based on chunk index
 
-            foreach ($rows as $row) {
-                $rowData = [
-                    'row_number' => $rowNumber,
-                    'data' => [
-                        'company' => $row['company'] ?? '',
-                        'email' => $row['email'] ?? '',
-                        'phone' => $row['phone'] ?? '',
-                    ],
-                    'is_duplicate' => false,
-                    'status' => 'pending',
-                    'error' => null,
-                ];
-
-                try {
-                    DB::table('clients')->insert([
-                        'company' => $row['company'] ?? '',
-                        'email' => $row['email'] ?? '',
-                        'phone' => $row['phone'] ?? '',
-                        'has_duplicates' => false,
-                        'extras' => null,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-
-                    $stats['imported']++;
-                    $rowData['status'] = 'success';
-
-                } catch (\Exception $e) {
-                    $stats['failed']++;
-                    $isDuplicate = str_contains($e->getMessage(), 'Duplicate') ||
-                                   str_contains($e->getMessage(), 'unique');
-
-                    if ($isDuplicate) {
-                        $stats['duplicates']++;
-                        $rowData['is_duplicate'] = true;
-                        $rowData['error'] = 'Duplicate entry: A client with this company, email, and phone combination already exists.';
-                    } else {
-                        $rowData['error'] = $e->getMessage();
-                    }
-                    $rowData['status'] = 'failed';
-                }
-
-                $processedRows[] = $rowData;
-                $rowNumber++;
-            }
+            // Use batch insert with temporary table for duplicate tracking
+            $processedRows = $this->batchInsertWithDuplicateTracking($rows, $rowNumber, $stats);
 
             $this->updateChunkStats($stats, $processedRows);
 
@@ -148,6 +105,217 @@ class ProcessChunkedClientsImport implements ShouldQueue
             Log::error("Chunk {$this->chunkIndex} failed for import {$this->importId}: " . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Batch insert rows with duplicate tracking using PostgreSQL COPY + temp table
+     * Returns array of processed rows with duplicate status
+     */
+    protected function batchInsertWithDuplicateTracking(array $rows, int $startRowNumber, array &$stats): array
+    {
+        if (empty($rows)) {
+            return [];
+        }
+
+        $processedRows = [];
+        $rowNumber = $startRowNumber;
+
+        // Validate all rows before attempting COPY
+        $validRows = [];
+        $validRowIndices = [];
+
+        foreach ($rows as $idx => $row) {
+            $company = $row['company'] ?? '';
+            $email = $row['email'] ?? '';
+            $phone = $row['phone'] ?? '';
+
+            // Validate row data (same rules as ClientsImport)
+            $validationError = $this->validateRow($company, $email, $phone);
+
+            if ($validationError) {
+                // Row failed validation - track as failed
+                $processedRows[] = [
+                    'row_number' => $rowNumber,
+                    'data' => [
+                        'company' => $company,
+                        'email' => $email,
+                        'phone' => $phone,
+                    ],
+                    'is_duplicate' => false,
+                    'status' => 'failed',
+                    'error' => $validationError,
+                ];
+                $stats['failed']++;
+            } else {
+                // Row passed validation - add to batch
+                $validRows[] = $row;
+                $validRowIndices[$idx] = $rowNumber;
+            }
+
+            $rowNumber++;
+        }
+
+
+        // Only process valid rows with COPY
+        if (empty($validRows)) {
+            return $processedRows;
+        }
+
+        $tempTableName = "temp_batch_{$this->importId}_{$this->chunkIndex}";
+
+        // Get raw PDO connection for COPY command
+        $pdo = DB::connection()->getPdo();
+
+        $pdo->beginTransaction();
+
+        try {
+            // Create temporary table for this batch
+            $pdo->exec("
+                CREATE TEMP TABLE {$tempTableName} (
+                    row_index INT,
+                    company VARCHAR(255),
+                    email VARCHAR(255),
+                    phone VARCHAR(255)
+                ) ON COMMIT DELETE ROWS
+            ");
+
+
+            // Use batch INSERT for fast temp table population
+            $this->populateTempTableWithCopy($pdo, $tempTableName, $validRows);
+
+
+            // Insert from temp table into clients, getting back what was inserted
+            $stmt = $pdo->query("
+                INSERT INTO clients (company, email, phone, has_duplicates, extras, created_at, updated_at)
+                SELECT company, email, phone, false, null, NOW(), NOW()
+                FROM {$tempTableName}
+                ON CONFLICT (company, email, phone) DO NOTHING
+                RETURNING company, email, phone
+            ");
+
+            $insertedRows = $stmt->fetchAll(\PDO::FETCH_OBJ);
+
+            // Commit transaction
+            $pdo->commit();
+
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+
+            // Drop temp table if it exists
+            try {
+                $pdo->exec("DROP TABLE IF EXISTS {$tempTableName}");
+            } catch (\Exception $dropError) {
+                // Ignore drop errors
+            }
+
+            throw $e;
+        }
+
+
+        // Build lookup of successfully inserted rows
+        $insertedLookup = [];
+        foreach ($insertedRows as $row) {
+            $key = $row->company . '|' . $row->email . '|' . $row->phone;
+            $insertedLookup[$key] = true;
+        }
+
+        // Mark valid rows as success/duplicate based on lookup
+        foreach ($validRows as $idx => $row) {
+            $company = $row['company'] ?? '';
+            $email = $row['email'] ?? '';
+            $phone = $row['phone'] ?? '';
+            $key = $company . '|' . $email . '|' . $phone;
+
+            $isDuplicate = !isset($insertedLookup[$key]);
+
+            $processedRows[] = [
+                'row_number' => $validRowIndices[$idx],
+                'data' => [
+                    'company' => $company,
+                    'email' => $email,
+                    'phone' => $phone,
+                ],
+                'is_duplicate' => $isDuplicate,
+                'status' => $isDuplicate ? 'failed' : 'success',
+                'error' => $isDuplicate
+                    ? 'Duplicate entry: A client with this company, email, and phone combination already exists.'
+                    : null,
+            ];
+
+            if ($isDuplicate) {
+                $stats['duplicates']++;
+                $stats['failed']++;
+            } else {
+                $stats['imported']++;
+            }
+        }
+
+        // Cleanup: Drop temp table
+        try {
+            $pdo->exec("DROP TABLE IF EXISTS {$tempTableName}");
+        } catch (\Exception $e) {
+            // Ignore cleanup errors
+            Log::warning("Chunk {$this->chunkIndex}: Failed to drop temp table {$tempTableName}: " . $e->getMessage());
+        }
+
+        return $processedRows;
+    }
+
+    /**
+     * Validate row data before insert
+     * Returns error message if validation fails, null if passes
+     */
+    protected function validateRow(string $company, string $email, string $phone): ?string
+    {
+        $errors = [];
+
+        // Validate company (required, max 255 chars)
+        if (empty(trim($company))) {
+            $errors[] = 'Company name is required';
+        } elseif (strlen($company) > 255) {
+            $errors[] = 'Company name must not exceed 255 characters';
+        }
+
+        // Validate email (required, valid format, max 55 chars)
+        if (empty(trim($email))) {
+            $errors[] = 'Email is required';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Email must be a valid email address';
+        } elseif (strlen($email) > 55) {
+            $errors[] = 'Email must not exceed 55 characters';
+        }
+
+        // Validate phone (required, max 22 chars)
+        if (empty(trim($phone))) {
+            $errors[] = 'Phone number is required';
+        } elseif (strlen($phone) > 22) {
+            $errors[] = 'Phone number must not exceed 22 characters';
+        }
+
+        return empty($errors) ? null : implode(', ', $errors);
+    }
+
+    /**
+     * Populate temp table using batch INSERT (fast, works across all environments)
+     */
+    protected function populateTempTableWithCopy(\PDO $pdo, string $tempTableName, array $rows): void
+    {
+        // Build batch INSERT statement
+        $values = [];
+        $params = [];
+
+        foreach ($rows as $idx => $row) {
+            $values[] = '(?, ?, ?, ?)';
+            $params[] = $idx;
+            $params[] = $row['company'] ?? '';
+            $params[] = $row['email'] ?? '';
+            $params[] = $row['phone'] ?? '';
+        }
+
+        // Single batch INSERT for all rows
+        $sql = "INSERT INTO {$tempTableName} (row_index, company, email, phone) VALUES " . implode(', ', $values);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
     }
 
     protected function updateChunkStats(array $stats, array $processedRows): void

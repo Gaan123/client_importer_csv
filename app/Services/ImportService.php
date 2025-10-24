@@ -237,6 +237,11 @@ class ImportService
             $importer = new $importClass();
             Excel::import($importer, $filePath);
 
+            // Flush any remaining rows in the batch buffer before getting results
+            if (method_exists($importer, 'flushBatch')) {
+                $importer->flushBatch();
+            }
+
             $imported = $importer->getImportedCount();
             $failed = $importer->getFailedCount();
             $allRows = $importer->getAllRows();

@@ -39,7 +39,6 @@ class FinalizeChunkedImport implements ShouldQueue
             $totalProcessed = $result->processed ?? 0;
             $totalFailed = $result->failed ?? 0;
 
-            Log::info("Finalization check for import {$this->importId}: Processed={$totalProcessed}, Failed={$totalFailed}, Expected={$this->expectedChunks}");
 
             if (($totalProcessed + $totalFailed) < $this->expectedChunks) {
                 Log::info("Not all chunks processed yet for import {$this->importId}, rescheduling finalization");
@@ -65,7 +64,6 @@ class FinalizeChunkedImport implements ShouldQueue
                 'duplicates' => $summaryResult->duplicates ?? 0,
             ];
 
-            Log::info("All chunks processed for import {$this->importId}, finalizing...");
             $status = ImportStatus::COMPLETED;
             if ($totalFailed > 0) {
                 $status = ImportStatus::COMPLETED_WITH_ERRORS;
@@ -109,7 +107,6 @@ class FinalizeChunkedImport implements ShouldQueue
                 ]
             );
 
-            Log::info("Import {$this->importId} finalized with status: {$status->value}");
             Log::info("Summary: Imported={$summary['imported']}, Failed={$summary['failed']}, Duplicates={$summary['duplicates']}");
 
             // Clean up chunk files and original CSV after successful processing
