@@ -31,5 +31,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Import management endpoints
     Route::get('/imports', [ImportsController::class, 'index']);
     Route::get('/imports/{import}', [ImportsController::class, 'show']);
+    Route::get('/imports/{import}/export', [ImportsController::class, 'export']);
     Route::delete('/imports/{import}', [ImportsController::class, 'destroy']);
 });

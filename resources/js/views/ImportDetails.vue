@@ -15,7 +15,20 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <!-- Summary Card -->
       <Card class="mb-4">
-        <template #title>Import Summary</template>
+        <template #title>
+          <div class="flex justify-between items-center">
+            <span>Import Summary</span>
+            <Button
+              :label="exportButtonLabel"
+              icon="pi pi-file-excel"
+              @click="exportToCSV"
+              severity="success"
+              :loading="exporting"
+              :disabled="exportDisabled"
+              size="small"
+            />
+          </div>
+        </template>
         <template #content>
           <div v-if="importData" class="grid grid-cols-4 gap-4">
             <div>
@@ -146,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import DataTable from 'primevue/datatable';
@@ -167,6 +180,9 @@ const totalRecords = ref(0);
 const perPage = ref(10);
 const currentPage = ref(1);
 const statusFilter = ref(null);
+const exporting = ref(false);
+const exportStatus = ref(null);
+const exportAvailable = ref(false);
 
 const fetchImportDetails = async (page = 1, rowsPerPage = 10) => {
   loading.value = true;
@@ -192,6 +208,8 @@ const fetchImportDetails = async (page = 1, rowsPerPage = 10) => {
     rows.value = response.data.clients.data;
     totalRecords.value = response.data.clients.total;
     currentPage.value = response.data.clients.current_page;
+    exportStatus.value = response.data.export_status;
+    exportAvailable.value = response.data.export_available;
   } catch (error) {
     console.error('Error fetching import details:', error);
   } finally {
@@ -216,6 +234,73 @@ const formatDate = (dateString) => {
 
 const goBack = () => {
   router.push('/imports');
+};
+
+const exportButtonLabel = computed(() => {
+  if (exportStatus.value === 'pending') {
+    return 'Generating Export...';
+  }
+  if (exportAvailable.value) {
+    return 'Download Export';
+  }
+  return 'Export to Excel';
+});
+
+const exportDisabled = computed(() => {
+  return exportStatus.value === 'pending';
+});
+
+const exportToCSV = async () => {
+  if (exporting.value) return;
+
+  exporting.value = true;
+  try {
+    const importId = route.params.id;
+    const response = await axios.get(`/api/imports/${importId}/export`, {
+      responseType: 'blob'
+    });
+
+    // Check if response is JSON (error or pending status)
+    if (response.headers['content-type']?.includes('application/json')) {
+      const text = await response.data.text();
+      const jsonResponse = JSON.parse(text);
+
+      if (jsonResponse.status === 'pending') {
+        // Refresh import details to update export status
+        await fetchImportDetails(currentPage.value, perPage.value);
+
+        // Poll every 2 seconds for export completion
+        const pollInterval = setInterval(async () => {
+          await fetchImportDetails(currentPage.value, perPage.value);
+
+          if (exportStatus.value !== 'pending') {
+            clearInterval(pollInterval);
+            exporting.value = false;
+
+            // If completed, trigger download
+            if (exportAvailable.value) {
+              exportToCSV();
+            }
+          }
+        }, 2000);
+      }
+    } else {
+      // Download the file
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `import_${importId}_export.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      exporting.value = false;
+    }
+  } catch (error) {
+    console.error('Error exporting:', error);
+    exporting.value = false;
+  }
 };
 
 const handleLogout = async () => {

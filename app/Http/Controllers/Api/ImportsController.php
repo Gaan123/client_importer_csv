@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ImportResource;
 use App\Models\Import;
+use App\Exports\ImportDetailsExport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\Response;
 
 class ImportsController extends Controller
@@ -130,6 +132,17 @@ class ImportsController extends Controller
             WHERE id = ?
         ", [$importId]);
 
+        // Get export metadata
+        $exportMeta = DB::selectOne("
+            SELECT metadata
+            FROM imports
+            WHERE id = ?
+        ", [$importId]);
+
+        $metadata = json_decode($exportMeta->metadata ?? '{}', true);
+        $exportStatus = $metadata['export_status'] ?? null;
+        $exportPath = $metadata['export_path'] ?? null;
+
         return response()->json([
             'import_id' => $importMeta->id,
             'status' => $importMeta->status,
@@ -140,6 +153,8 @@ class ImportsController extends Controller
                 'failed' => $summary->failed ?? 0,
                 'duplicates' => $summary->duplicates ?? 0,
             ],
+            'export_status' => $exportStatus,
+            'export_available' => $exportStatus === 'completed' && $exportPath !== null,
             'clients' => [
                 'data' => $clients,
                 'current_page' => (int) $page,
@@ -150,6 +165,92 @@ class ImportsController extends Controller
                 'to' => $total > 0 ? min($offset + $perPage, $total) : null,
             ],
         ]);
+    }
+
+    /**
+     * Export import details to Excel with RED background for failed rows.
+     */
+    public function export(Request $request, $importId)
+    {
+        $import = Import::find($importId);
+
+        if (!$import) {
+            return response()->json(['message' => 'Import not found.'], 404);
+        }
+
+        $metadata = $import->metadata ?? [];
+
+        if (isset($metadata['export_status'])) {
+            if ($metadata['export_status'] === 'pending') {
+                return response()->json([
+                    'status' => 'pending',
+                    'message' => 'Export is being generated. Please wait...'
+                ], 202);
+            }
+
+            if ($metadata['export_status'] === 'completed' && isset($metadata['export_path'])) {
+                if (Storage::disk('local')->exists($metadata['export_path'])) {
+                    return Storage::disk('local')->download($metadata['export_path'], "import_{$importId}_export.xlsx");
+                }
+            }
+        }
+
+        $import->metadata = array_merge($metadata, ['export_status' => 'pending']);
+        $import->save();
+
+        try {
+            $exportPath = "exports/import_{$importId}_" . now()->format('Y-m-d_His') . ".xlsx";
+
+            $rows = DB::select("
+                SELECT
+                    (row->>'row_number')::integer as row_number,
+                    row->'data'->>'company' as company,
+                    row->'data'->>'email' as email,
+                    row->'data'->>'phone' as phone,
+                    row->>'status' as status,
+                    (row->>'is_duplicate')::boolean as is_duplicate,
+                    row->>'error' as error
+                FROM imports,
+                     jsonb_array_elements(data->'rows') as row
+                WHERE imports.id = ?
+                ORDER BY (row->>'row_number')::integer
+            ", [$importId]);
+
+            $rowsArray = array_map(function($row) {
+                return [
+                    'row_number' => $row->row_number,
+                    'company' => $row->company,
+                    'email' => $row->email,
+                    'phone' => $row->phone,
+                    'status' => $row->status,
+                    'is_duplicate' => $row->is_duplicate,
+                    'error' => $row->error,
+                ];
+            }, $rows);
+
+            Excel::store(new ImportDetailsExport($rowsArray), $exportPath, 'local');
+
+            $import->metadata = array_merge($import->metadata ?? [], [
+                'export_status' => 'completed',
+                'export_path' => $exportPath,
+                'export_generated_at' => now()->toDateTimeString()
+            ]);
+            $import->save();
+
+            return Storage::disk('local')->download($exportPath, "import_{$importId}_export.xlsx");
+
+        } catch (\Exception $e) {
+            $import->metadata = array_merge($import->metadata ?? [], [
+                'export_status' => 'failed',
+                'export_error' => $e->getMessage()
+            ]);
+            $import->save();
+
+            return response()->json([
+                'message' => 'Failed to generate export.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
