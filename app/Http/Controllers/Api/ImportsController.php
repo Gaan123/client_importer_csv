@@ -29,7 +29,10 @@ class ImportsController extends Controller
             'importable_type',
             'created_at',
             'updated_at',
-            'metadata'
+            'metadata',
+            DB::raw("(data->'summary'->>'imported')::integer as success_count"),
+            DB::raw("(data->'summary'->>'failed')::integer as failed_count"),
+            DB::raw("(data->'summary'->>'duplicates')::integer as duplicates_count")
         ])->orderBy('created_at', 'desc');
 
         if ($status) {

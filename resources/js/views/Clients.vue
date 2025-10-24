@@ -13,6 +13,7 @@
           <h1 class="text-2xl font-bold">Clients</h1>
           <div class="flex gap-2">
             <Button label="Create Client" icon="pi pi-plus" @click="openCreateDialog" />
+            <Button label="Import Logs" icon="pi pi-file" @click="goToImports" severity="secondary" />
             <Button label="Logout" icon="pi pi-sign-out" @click="handleLogout" severity="secondary" />
           </div>
         </div>
@@ -227,6 +228,10 @@ const openEditDialog = (client) => {
 
 const handleClientSaved = (data) => {
   fetchClients(currentPage.value, perPage.value);
+};
+
+const goToImports = () => {
+  router.push('/imports');
 };
 
 const handleLogout = async () => {

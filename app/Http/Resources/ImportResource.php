@@ -21,6 +21,11 @@ class ImportResource extends JsonResource
             'total_rows' => $this->total_rows,
             'file_signature' => $this->file_signature,
             'metadata' => $this->metadata,
+            'summary' => [
+                'success' => $this->success_count ?? 0,
+                'failed' => $this->failed_count ?? 0,
+                'duplicates' => $this->duplicates_count ?? 0,
+            ],
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

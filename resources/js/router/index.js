@@ -3,6 +3,8 @@ import { useAuthStore } from '../stores/auth';
 import Login from '../views/Login.vue';
 import Clients from '../views/Clients.vue';
 import ClientDuplicates from '../views/ClientDuplicates.vue';
+import Imports from '../views/Imports.vue';
+import ImportDetails from '../views/ImportDetails.vue';
 
 const routes = [
   {
@@ -26,6 +28,18 @@ const routes = [
     path: '/clients/:id/duplicates',
     name: 'client-duplicates',
     component: ClientDuplicates,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/imports',
+    name: 'imports',
+    component: Imports,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/imports/:id',
+    name: 'import-details',
+    component: ImportDetails,
     meta: { requiresAuth: true }
   }
 ];
