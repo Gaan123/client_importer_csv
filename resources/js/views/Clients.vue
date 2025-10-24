@@ -7,12 +7,80 @@
       @saved="handleClientSaved"
     />
 
+    <!-- Import CSV Dialog -->
+    <Dialog v-model:visible="showImportDialog" modal header="Import Clients from CSV" :style="{ width: '500px' }">
+      <div class="space-y-4">
+        <div>
+          <FileUpload
+            mode="basic"
+            name="file"
+            accept=".csv"
+            :auto="false"
+            chooseLabel="Choose CSV File"
+            @select="onFileSelect"
+            :disabled="uploading"
+          />
+          <small class="text-gray-500 mt-2 block">
+            Accepted format: CSV
+          </small>
+        </div>
+
+        <div v-if="selectedFile" class="bg-gray-50 p-3 rounded">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i class="pi pi-file text-blue-500"></i>
+              <span class="text-sm font-medium">{{ selectedFile.name }}</span>
+            </div>
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              severity="danger"
+              @click="clearFile"
+              :disabled="uploading"
+            />
+          </div>
+          <div class="text-xs text-gray-500 mt-1">
+            Size: {{ formatFileSize(selectedFile.size) }}
+          </div>
+        </div>
+
+        <div v-if="uploading" class="space-y-2">
+          <ProgressBar mode="indeterminate" style="height: 6px" />
+          <p class="text-sm text-center text-gray-600">Uploading and processing CSV file...</p>
+        </div>
+
+        <div v-if="importResult" class="border rounded p-3" :class="importResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'">
+          <div class="flex items-start gap-2">
+            <i :class="importResult.success ? 'pi pi-check-circle text-green-600' : 'pi pi-times-circle text-red-600'"></i>
+            <div class="flex-1">
+              <p class="font-medium" :class="importResult.success ? 'text-green-800' : 'text-red-800'">
+                {{ importResult.message }}
+              </p>
+              <div v-if="importResult.success && importResult.stats" class="mt-2 text-sm text-gray-700">
+                <p>Total Rows: {{ importResult.stats.total }}</p>
+                <p class="text-green-600">Imported: {{ importResult.stats.imported }}</p>
+                <p v-if="importResult.stats.failed > 0" class="text-red-600">Failed: {{ importResult.stats.failed }}</p>
+                <p v-if="importResult.stats.duplicates > 0" class="text-yellow-600">Duplicates: {{ importResult.stats.duplicates }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <Button label="Cancel" icon="pi pi-times" @click="closeImportDialog" severity="secondary" :disabled="uploading" />
+        <Button label="Upload & Import" icon="pi pi-upload" @click="uploadFile" :disabled="!selectedFile || uploading" :loading="uploading" />
+      </template>
+    </Dialog>
+
     <div class="bg-white shadow">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center py-4">
           <h1 class="text-2xl font-bold">Clients</h1>
           <div class="flex gap-2">
             <Button label="Create Client" icon="pi pi-plus" @click="openCreateDialog" />
+            <Button label="Import CSV" icon="pi pi-upload" @click="openImportDialog" severity="info" />
             <Button label="Import Logs" icon="pi pi-file" @click="goToImports" severity="secondary" />
             <Button label="Logout" icon="pi pi-sign-out" @click="handleLogout" severity="secondary" />
           </div>
@@ -127,12 +195,17 @@ import IconField from 'primevue/iconfield';
 import InputIcon from 'primevue/inputicon';
 import ConfirmDialog from 'primevue/confirmdialog';
 import Checkbox from 'primevue/checkbox';
+import Dialog from 'primevue/dialog';
+import FileUpload from 'primevue/fileupload';
+import ProgressBar from 'primevue/progressbar';
 import ClientFormModal from '../components/ClientFormModal.vue';
 import axios from 'axios';
+import { useToast } from 'primevue/usetoast';
 
 const router = useRouter();
 const authStore = useAuthStore();
 const confirm = useConfirm();
+const toast = useToast();
 
 const clients = ref([]);
 const loading = ref(false);
@@ -148,6 +221,12 @@ const filters = ref({
 
 const showClientDialog = ref(false);
 const selectedClient = ref(null);
+
+// Import CSV Dialog
+const showImportDialog = ref(false);
+const selectedFile = ref(null);
+const uploading = ref(false);
+const importResult = ref(null);
 
 const fetchClients = async (page = 1, rows = 10) => {
   loading.value = true;
@@ -232,6 +311,105 @@ const handleClientSaved = (data) => {
 
 const goToImports = () => {
   router.push('/imports');
+};
+
+const openImportDialog = () => {
+  showImportDialog.value = true;
+  selectedFile.value = null;
+  importResult.value = null;
+};
+
+const closeImportDialog = () => {
+  showImportDialog.value = false;
+  selectedFile.value = null;
+  importResult.value = null;
+};
+
+const onFileSelect = (event) => {
+  selectedFile.value = event.files[0];
+  importResult.value = null;
+};
+
+const clearFile = () => {
+  selectedFile.value = null;
+  importResult.value = null;
+};
+
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+};
+
+const uploadFile = async () => {
+  if (!selectedFile.value) return;
+
+  uploading.value = true;
+  importResult.value = null;
+
+  try {
+    const formData = new FormData();
+    formData.append('file', selectedFile.value);
+
+    const response = await axios.post('/api/clients/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    if (response.data.success) {
+      importResult.value = {
+        success: true,
+        message: 'Import completed successfully!',
+        stats: response.data.data
+      };
+
+      toast.add({
+        severity: 'success',
+        summary: 'Import Successful',
+        detail: `Imported ${response.data.data.imported} clients successfully`,
+        life: 5000
+      });
+
+      // Refresh client list after successful import
+      setTimeout(() => {
+        fetchClients(currentPage.value, perPage.value);
+        closeImportDialog();
+      }, 2000);
+    } else {
+      importResult.value = {
+        success: false,
+        message: response.data.message || 'Import failed',
+      };
+
+      toast.add({
+        severity: 'error',
+        summary: 'Import Failed',
+        detail: response.data.message || 'Failed to import CSV',
+        life: 5000
+      });
+    }
+  } catch (error) {
+    console.error('Error uploading file:', error);
+
+    const errorMessage = error.response?.data?.message || error.response?.data?.error || 'Failed to upload file';
+
+    importResult.value = {
+      success: false,
+      message: errorMessage,
+    };
+
+    toast.add({
+      severity: 'error',
+      summary: 'Upload Error',
+      detail: errorMessage,
+      life: 5000
+    });
+  } finally {
+    uploading.value = false;
+  }
 };
 
 const handleLogout = async () => {
