@@ -46,13 +46,26 @@ class ImportsController extends Controller
      * Display the specified import's client logs (failed and succeeded).
      * Uses PostgreSQL JSON operators to efficiently flatten and filter data.
      */
-    public function show(Request $request, Import $import)
+    public function show(Request $request, $importId)
     {
         $perPage = $request->get('per_page', 15);
         $page = $request->get('page', 1);
         $type = $request->get('type'); // 'failed' or 'success'
         $isDuplicate = $request->get('is_duplicate'); // 'true', 'false', or null
         $offset = ($page - 1) * $perPage;
+
+        // Get import metadata WITHOUT loading the data column
+        $importMeta = DB::selectOne("
+            SELECT id, status, total_rows, importable_type
+            FROM imports
+            WHERE id = ?
+        ", [$importId]);
+
+        if (!$importMeta) {
+            return response()->json([
+                'message' => 'Import not found.',
+            ], 404);
+        }
 
         // Build WHERE clause for status filtering
         $statusFilter = '';
@@ -89,7 +102,7 @@ class ImportsController extends Controller
             {$duplicateFilter}
             ORDER BY (row->>'row_number')::integer
             LIMIT ? OFFSET ?
-        ", [$import->id, $perPage, $offset]);
+        ", [$importId, $perPage, $offset]);
 
         // Get total count for pagination
         $totalQuery = DB::select("
@@ -99,11 +112,11 @@ class ImportsController extends Controller
             WHERE imports.id = ?
             {$statusFilter}
             {$duplicateFilter}
-        ", [$import->id]);
+        ", [$importId]);
 
         $total = $totalQuery[0]->total ?? 0;
 
-        // Get summary from the data JSON field
+        // Get summary from the data JSON field without loading entire column
         $summary = DB::selectOne("
             SELECT
                 (data->'summary'->>'total')::integer as total,
@@ -112,12 +125,12 @@ class ImportsController extends Controller
                 (data->'summary'->>'duplicates')::integer as duplicates
             FROM imports
             WHERE id = ?
-        ", [$import->id]);
+        ", [$importId]);
 
         return response()->json([
-            'import_id' => $import->id,
-            'status' => $import->status,
-            'total_rows' => $import->total_rows,
+            'import_id' => $importMeta->id,
+            'status' => $importMeta->status,
+            'total_rows' => $importMeta->total_rows,
             'summary' => [
                 'total' => $summary->total ?? 0,
                 'imported' => $summary->imported ?? 0,

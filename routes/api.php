@@ -16,6 +16,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
     Route::post('/logout', [AuthController::class, 'logout']);
 
+    // Clients CRUD endpoints
+    Route::get('/clients', [ClientsController::class, 'index']);
+    Route::post('/clients', [ClientsController::class, 'store']);
+    Route::get('/clients/{client}', [ClientsController::class, 'show']);
+    Route::put('/clients/{client}', [ClientsController::class, 'update']);
+    Route::patch('/clients/{client}', [ClientsController::class, 'update']);
+    Route::delete('/clients/{client}', [ClientsController::class, 'destroy']);
+
     // Client import endpoint
     Route::post('/clients/import', [ClientsController::class, 'import']);
 
