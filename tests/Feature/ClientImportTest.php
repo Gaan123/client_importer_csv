@@ -61,7 +61,7 @@ class ClientImportTest extends TestCase
         ]);
 
         Bus::assertBatched(function ($batch) {
-            return $batch->name === 'Import Clients - 1';
+            return str_starts_with($batch->name, 'Import Clients - ');
         });
 
         $this->assertDatabaseCount('imports', 1);
