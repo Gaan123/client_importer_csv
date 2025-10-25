@@ -81,6 +81,7 @@
           <div class="flex gap-2">
             <Button label="Create Client" icon="pi pi-plus" @click="openCreateDialog" />
             <Button label="Import CSV" icon="pi pi-upload" @click="openImportDialog" severity="info" />
+            <Button label="Export Clients" icon="pi pi-file-excel" @click="goToExports" severity="success" />
             <Button label="Import Logs" icon="pi pi-file" @click="goToImports" severity="secondary" />
             <Button label="Logout" icon="pi pi-sign-out" @click="handleLogout" severity="secondary" />
           </div>
@@ -119,8 +120,9 @@
                     <i class="pi pi-search" />
                   </InputIcon>
                   <InputText
-                    v-model="filters['global'].value"
+                    v-model="searchQuery"
                     placeholder="Search clients..."
+                    @input="onSearchInput"
                   />
                 </IconField>
               </div>
@@ -213,6 +215,7 @@ const totalRecords = ref(0);
 const perPage = ref(10);
 const currentPage = ref(1);
 const showOnlyDuplicates = ref(false);
+const searchQuery = ref('');
 const filters = ref({
   global: { value: null, matchMode: FilterMatchMode.CONTAINS },
   company: { value: null, matchMode: FilterMatchMode.CONTAINS },
@@ -228,6 +231,9 @@ const selectedFile = ref(null);
 const uploading = ref(false);
 const importResult = ref(null);
 
+// Export
+const exporting = ref(false);
+
 const fetchClients = async (page = 1, rows = 10) => {
   loading.value = true;
   try {
@@ -238,6 +244,10 @@ const fetchClients = async (page = 1, rows = 10) => {
 
     if (showOnlyDuplicates.value) {
       params.has_duplicates = 1;
+    }
+
+    if (searchQuery.value) {
+      params.search = searchQuery.value;
     }
 
     const response = await axios.get('/api/clients', { params });
@@ -311,6 +321,10 @@ const handleClientSaved = (data) => {
 
 const goToImports = () => {
   router.push('/imports');
+};
+
+const goToExports = () => {
+  router.push('/exports');
 };
 
 const openImportDialog = () => {
@@ -415,6 +429,143 @@ const uploadFile = async () => {
 const handleLogout = async () => {
   await authStore.logout();
   router.push('/login');
+};
+
+let searchTimeout = null;
+const onSearchInput = () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    fetchClients(1, perPage.value);
+  }, 500);
+};
+
+const exportClients = async () => {
+  if (exporting.value) return;
+
+  exporting.value = true;
+  try {
+    const response = await axios.get('/api/clients/export');
+
+    if (response.data.async) {
+      const exportId = response.data.export_id;
+
+      toast.add({
+        severity: 'info',
+        summary: 'Export Queued',
+        detail: 'Large export queued. Preparing your file...',
+        life: 3000
+      });
+
+      pollExportStatus(exportId);
+    } else {
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `clients_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      toast.add({
+        severity: 'success',
+        summary: 'Export Successful',
+        detail: 'Clients exported successfully',
+        life: 3000
+      });
+
+      exporting.value = false;
+    }
+  } catch (error) {
+    console.error('Error exporting clients:', error);
+    toast.add({
+      severity: 'error',
+      summary: 'Export Failed',
+      detail: error.response?.data?.message || 'Failed to export clients',
+      life: 5000
+    });
+    exporting.value = false;
+  }
+};
+
+const pollExportStatus = async (exportId) => {
+  const maxAttempts = 60;
+  let attempts = 0;
+
+  const poll = async () => {
+    try {
+      const response = await axios.get(`/api/clients/export/${exportId}/status`);
+      const status = response.data;
+
+      if (status.status === 'completed') {
+        await downloadExport(exportId);
+        exporting.value = false;
+        return;
+      }
+
+      if (status.status === 'failed') {
+        toast.add({
+          severity: 'error',
+          summary: 'Export Failed',
+          detail: status.error || 'Export generation failed',
+          life: 5000
+        });
+        exporting.value = false;
+        return;
+      }
+
+      attempts++;
+      if (attempts >= maxAttempts) {
+        toast.add({
+          severity: 'warn',
+          summary: 'Export Timeout',
+          detail: 'Export is taking longer than expected. Please try again later.',
+          life: 5000
+        });
+        exporting.value = false;
+        return;
+      }
+
+      setTimeout(poll, 2000);
+    } catch (error) {
+      console.error('Error polling export status:', error);
+      exporting.value = false;
+    }
+  };
+
+  poll();
+};
+
+const downloadExport = async (exportId) => {
+  try {
+    const response = await axios.get(`/api/clients/export/${exportId}/download`, {
+      responseType: 'blob'
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `clients_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+
+    toast.add({
+      severity: 'success',
+      summary: 'Export Complete',
+      detail: 'File downloaded successfully',
+      life: 3000
+    });
+  } catch (error) {
+    console.error('Error downloading export:', error);
+    toast.add({
+      severity: 'error',
+      summary: 'Download Failed',
+      detail: 'Failed to download export file',
+      life: 5000
+    });
+  }
 };
 
 onMounted(() => {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ImportStatus;
+use App\Exports\ClientsExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportClientsRequest;
 use App\Http\Requests\StoreClientRequest;
@@ -10,12 +11,16 @@ use App\Http\Requests\UpdateClientRequest;
 use App\Http\Resources\ClientResource;
 use App\Http\Resources\ImportResource;
 use App\Jobs\DetectSingleClientDuplicate;
+use App\Jobs\GenerateClientsExport;
 use App\Jobs\ProcessClientsImport;
 use App\Models\Clients;
 use App\Services\ImportService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 class ClientsController extends Controller
@@ -290,5 +295,161 @@ class ClientsController extends Controller
             ->additional(['message' => 'Import queued successfully. Check import status for results.'])
             ->response()
             ->setStatusCode(Response::HTTP_ACCEPTED);
+    }
+
+    public function export(Request $request)
+    {
+        try {
+            $totalClients = Clients::count();
+
+            if ($totalClients > 10000) {
+                $exportId = Str::uuid()->toString();
+
+                Cache::put("client_export_{$exportId}", [
+                    'status' => 'queued',
+                    'progress' => 0
+                ], now()->addHours(2));
+
+                GenerateClientsExport::dispatch($exportId);
+
+                return response()->json([
+                    'message' => 'Export queued successfully. Please check status.',
+                    'export_id' => $exportId,
+                    'async' => true
+                ], Response::HTTP_ACCEPTED);
+            }
+
+            $exportPath = "exports/clients_" . now()->format('Y-m-d_His') . ".csv";
+            $exporter = new ClientsExport();
+            $exporter->exportToCsv($exportPath);
+
+            $fullPath = Storage::disk('local')->path($exportPath);
+
+            return response()->download($fullPath)->deleteFileAfterSend(true);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to export clients.',
+                'error' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    public function exportStatus(string $exportId)
+    {
+        $status = Cache::get("client_export_{$exportId}");
+
+        if (!$status) {
+            return response()->json([
+                'message' => 'Export not found or expired.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->json($status);
+    }
+
+    public function exportDownload(string $exportId)
+    {
+        $status = Cache::get("client_export_{$exportId}");
+
+        if (!$status || $status['status'] !== 'completed') {
+            return response()->json([
+                'message' => 'Export not ready or not found.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        $fullPath = Storage::disk('local')->path($status['path']);
+
+        if (!file_exists($fullPath)) {
+            return response()->json([
+                'message' => 'Export file not found.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        return response()->download($fullPath)->deleteFileAfterSend(true);
+    }
+
+    public function exports()
+    {
+        try {
+            $exports = [];
+            $files = Storage::disk('local')->files('exports');
+
+            foreach ($files as $file) {
+                if (str_ends_with($file, '.csv') && str_contains($file, 'clients_')) {
+                    $filename = basename($file);
+                    $fullPath = Storage::disk('local')->path($file);
+
+                    $exports[] = [
+                        'filename' => $filename,
+                        'path' => $file,
+                        'size' => filesize($fullPath),
+                        'created_at' => date('Y-m-d H:i:s', filemtime($fullPath)),
+                    ];
+                }
+            }
+
+            usort($exports, function($a, $b) {
+                return strtotime($b['created_at']) - strtotime($a['created_at']);
+            });
+
+            return response()->json([
+                'data' => $exports
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to list exports.',
+                'error' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    public function downloadExportFile(string $filename)
+    {
+        try {
+            $path = 'exports/' . $filename;
+
+            if (!Storage::disk('local')->exists($path)) {
+                return response()->json([
+                    'message' => 'Export file not found.',
+                ], Response::HTTP_NOT_FOUND);
+            }
+
+            $fullPath = Storage::disk('local')->path($path);
+
+            return response()->download($fullPath, $filename);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to download export.',
+                'error' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    public function deleteExport(string $filename)
+    {
+        try {
+            $path = 'exports/' . $filename;
+
+            if (!Storage::disk('local')->exists($path)) {
+                return response()->json([
+                    'message' => 'Export file not found.',
+                ], Response::HTTP_NOT_FOUND);
+            }
+
+            Storage::disk('local')->delete($path);
+
+            return response()->json([
+                'message' => 'Export deleted successfully.',
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to delete export.',
+                'error' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }

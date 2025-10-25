@@ -21,6 +21,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/clients', [ClientsController::class, 'store']);
 
     Route::post('/clients/import', [ClientsController::class, 'import']);
+    Route::get('/clients/export', [ClientsController::class, 'export']);
+    Route::get('/clients/export/{exportId}/status', [ClientsController::class, 'exportStatus']);
+    Route::get('/clients/export/{exportId}/download', [ClientsController::class, 'exportDownload']);
+
+    Route::get('/clients/exports', [ClientsController::class, 'exports']);
+    Route::get('/clients/exports/{filename}/download', [ClientsController::class, 'downloadExportFile']);
+    Route::delete('/clients/exports/{filename}', [ClientsController::class, 'deleteExport']);
 
     Route::get('/clients/{client}', [ClientsController::class, 'show']);
     Route::get('/clients/{client}/duplicates', [ClientsController::class, 'duplicates']);
