@@ -2,99 +2,97 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\FromArray;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithStyles;
-use Maatwebsite\Excel\Concerns\WithColumnWidths;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\Color;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
-class ImportDetailsExport implements FromArray, WithHeadings, WithStyles, WithColumnWidths
+class ImportDetailsExport
 {
-    protected $rows;
-    protected $failedRowNumbers = [];
+    protected $importId;
 
-    public function __construct(array $rows)
+    public function __construct(int $importId)
     {
-        $this->rows = $rows;
+        $this->importId = $importId;
+    }
 
-        // Track which row numbers have failed status
-        foreach ($rows as $index => $row) {
-            if ($row['status'] === 'failed') {
-                // +2 because: +1 for header row, +1 for 0-based to 1-based index
-                $this->failedRowNumbers[] = $index + 2;
+    /**
+     * Export to CSV using PostgreSQL streaming cursor
+     */
+    public function exportToCsv(string $filePath): bool
+    {
+        set_time_limit(0);
+
+        $fullPath = Storage::disk('local')->path($filePath);
+        $directory = dirname($fullPath);
+
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $handle = fopen($fullPath, 'w');
+        if (!$handle) {
+            throw new \Exception("Could not open file for writing: {$fullPath}");
+        }
+
+        try {
+            Log::info("Starting PostgreSQL streaming export for import {$this->importId}");
+
+            fputcsv($handle, ['Row #', 'Company', 'Email', 'Phone', 'Status', 'Is Duplicate', 'Error']);
+
+            $pdo = DB::connection()->getPdo();
+            $pdo->setAttribute(\PDO::ATTR_EMULATE_PREPARES, false);
+
+            $query = "
+                SELECT
+                    row_data->>'row_number' as row_number,
+                    COALESCE(row_data->'data'->>'company', '') as company,
+                    COALESCE(row_data->'data'->>'email', '') as email,
+                    COALESCE(row_data->'data'->>'phone', '') as phone,
+                    COALESCE(row_data->>'status', '') as status,
+                    CASE
+                        WHEN (row_data->>'is_duplicate')::boolean IS TRUE THEN 'Yes'
+                        ELSE 'No'
+                    END as is_duplicate,
+                    COALESCE(row_data->>'error', '') as error
+                FROM (
+                    SELECT jsonb_array_elements(data->'rows') as row_data
+                    FROM imports
+                    WHERE id = :id
+                ) subquery
+                ORDER BY (row_data->>'row_number')::integer
+            ";
+
+            $stmt = $pdo->prepare($query, [\PDO::ATTR_CURSOR => \PDO::CURSOR_FWDONLY]);
+            $stmt->execute(['id' => $this->importId]);
+
+            $count = 0;
+            while ($row = $stmt->fetch(\PDO::FETCH_NUM)) {
+                fputcsv($handle, $row);
+                $count++;
+
+                if ($count % 10000 === 0) {
+                    Log::info("Exported {$count} rows...");
+                }
             }
+
+            $stmt->closeCursor();
+            fclose($handle);
+
+            Log::info("PostgreSQL export completed successfully: {$count} rows exported to {$fullPath}");
+            return true;
+
+        } catch (\Exception $e) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+
+            Log::error("PostgreSQL export failed: " . $e->getMessage());
+
+            if (file_exists($fullPath)) {
+                unlink($fullPath);
+            }
+
+            throw $e;
         }
-    }
-
-    public function array(): array
-    {
-        return array_map(function($row) {
-            return [
-                $row['row_number'],
-                $row['company'],
-                $row['email'],
-                $row['phone'],
-                $row['status'],
-                $row['is_duplicate'] ? 'Yes' : 'No',
-                $row['error'] ?? '',
-            ];
-        }, $this->rows);
-    }
-
-    public function headings(): array
-    {
-        return [
-            'Row #',
-            'Company',
-            'Email',
-            'Phone',
-            'Status',
-            'Is Duplicate',
-            'Error',
-        ];
-    }
-
-    public function styles(Worksheet $sheet)
-    {
-        $styles = [];
-
-        // Style header row (row 1)
-        $styles[1] = [
-            'font' => ['bold' => true],
-            'fill' => [
-                'fillType' => Fill::FILL_SOLID,
-                'startColor' => ['rgb' => 'E2E8F0'], // Light gray
-            ],
-        ];
-
-        // Apply red background to failed rows
-        foreach ($this->failedRowNumbers as $rowNumber) {
-            $styles[$rowNumber] = [
-                'fill' => [
-                    'fillType' => Fill::FILL_SOLID,
-                    'startColor' => ['rgb' => 'FEE2E2'], // Light red background
-                ],
-                'font' => [
-                    'color' => ['rgb' => '991B1B'], // Dark red text
-                ],
-            ];
-        }
-
-        return $styles;
-    }
-
-    public function columnWidths(): array
-    {
-        return [
-            'A' => 10,  // Row #
-            'B' => 25,  // Company
-            'C' => 30,  // Email
-            'D' => 20,  // Phone
-            'E' => 12,  // Status
-            'F' => 15,  // Is Duplicate
-            'G' => 50,  // Error
-        ];
     }
 }

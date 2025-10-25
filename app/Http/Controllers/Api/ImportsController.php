@@ -6,10 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ImportResource;
 use App\Models\Import;
 use App\Exports\ImportDetailsExport;
+use App\Jobs\GenerateImportExport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Maatwebsite\Excel\Facades\Excel;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class ImportsController extends Controller
@@ -168,11 +169,11 @@ class ImportsController extends Controller
     }
 
     /**
-     * Export import details to Excel with RED background for failed rows.
+     * Export import details to Excel.
      */
     public function export(Request $request, $importId)
     {
-        $import = Import::find($importId);
+        $import = Import::select(['metadata','id','total_rows'])->find($importId);
 
         if (!$import) {
             return response()->json(['message' => 'Import not found.'], 404);
@@ -190,57 +191,52 @@ class ImportsController extends Controller
 
             if ($metadata['export_status'] === 'completed' && isset($metadata['export_path'])) {
                 if (Storage::disk('local')->exists($metadata['export_path'])) {
-                    return Storage::disk('local')->download($metadata['export_path'], "import_{$importId}_export.xlsx");
+                    $filename = "import_{$importId}_export.csv";
+                    return Storage::disk('local')->download($metadata['export_path'], $filename);
                 }
             }
         }
 
-        $import->metadata = array_merge($metadata, ['export_status' => 'pending']);
-        $import->save();
+        if ($import->total_rows > 5000) {
+            $currentMetadata = $import->metadata ?? [];
+            $import->metadata = array_merge($currentMetadata, ['export_status' => 'pending']);
+            $import->save();
+
+            GenerateImportExport::dispatch($importId);
+
+            return response()->json([
+                'status' => 'pending',
+                'message' => 'Export generation started. Please wait...'
+            ], 202);
+        }
 
         try {
-            $exportPath = "exports/import_{$importId}_" . now()->format('Y-m-d_His') . ".xlsx";
+            $exportPath = "exports/import_{$importId}_" . now()->format('Y-m-d_His') . ".csv";
 
-            $rows = DB::select("
-                SELECT
-                    (row->>'row_number')::integer as row_number,
-                    row->'data'->>'company' as company,
-                    row->'data'->>'email' as email,
-                    row->'data'->>'phone' as phone,
-                    row->>'status' as status,
-                    (row->>'is_duplicate')::boolean as is_duplicate,
-                    row->>'error' as error
-                FROM imports,
-                     jsonb_array_elements(data->'rows') as row
-                WHERE imports.id = ?
-                ORDER BY (row->>'row_number')::integer
-            ", [$importId]);
+            Log::info("Generating export synchronously for import {$importId}");
 
-            $rowsArray = array_map(function($row) {
-                return [
-                    'row_number' => $row->row_number,
-                    'company' => $row->company,
-                    'email' => $row->email,
-                    'phone' => $row->phone,
-                    'status' => $row->status,
-                    'is_duplicate' => $row->is_duplicate,
-                    'error' => $row->error,
-                ];
-            }, $rows);
+            $exporter = new ImportDetailsExport($importId);
+            $exporter->exportToCsv($exportPath);
 
-            Excel::store(new ImportDetailsExport($rowsArray), $exportPath, 'local');
-
-            $import->metadata = array_merge($import->metadata ?? [], [
+            $import->refresh();
+            $currentMetadata = $import->metadata ?? [];
+            $import->metadata = array_merge($currentMetadata, [
                 'export_status' => 'completed',
                 'export_path' => $exportPath,
                 'export_generated_at' => now()->toDateTimeString()
             ]);
             $import->save();
 
-            return Storage::disk('local')->download($exportPath, "import_{$importId}_export.xlsx");
+            Log::info("Export completed for import {$importId}");
+
+            return Storage::disk('local')->download($exportPath, "import_{$importId}_export.csv");
 
         } catch (\Exception $e) {
-            $import->metadata = array_merge($import->metadata ?? [], [
+            Log::error("Export generation failed for import {$importId}: " . $e->getMessage());
+
+            $import->refresh();
+            $currentMetadata = $import->metadata ?? [];
+            $import->metadata = array_merge($currentMetadata, [
                 'export_status' => 'failed',
                 'export_error' => $e->getMessage()
             ]);
