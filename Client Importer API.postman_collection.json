@@ -1,0 +1,663 @@
+{
+	"info": {
+		"_postman_id": "8a32f45a-3053-4b61-a164-bc16012d17b1",
+		"name": "Client Importer API",
+		"description": "Complete API collection for Client Importer application with authentication, clients, imports, and exports endpoints.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "36741030",
+		"_collection_link": "https://interstellar-station-229653.postman.co/workspace/2073c870-a26e-4936-8317-3a597862d951/collection/36741030-8a32f45a-3053-4b61-a164-bc16012d17b1?action=share&source=collection_link&creator=36741030"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Store CSRF token if returned",
+									"if (pm.response.headers.has('Set-Cookie')) {",
+									"    var cookies = pm.response.headers.get('Set-Cookie');",
+									"    console.log('Cookies set:', cookies);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@admin.com\",\n    \"password\": \"password\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"login"
+							]
+						},
+						"description": "Login with existing credentials. Default: admin@admin.com / password"
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/logout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"logout"
+							]
+						},
+						"description": "Logout current user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Authenticated User",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/user",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user"
+							]
+						},
+						"description": "Get currently authenticated user details"
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints using Laravel Sanctum"
+		},
+		{
+			"name": "Clients",
+			"item": [
+				{
+					"name": "List Clients",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients?page=1&per_page=15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number"
+								},
+								{
+									"key": "per_page",
+									"value": "15",
+									"description": "Items per page (default: 15)"
+								},
+								{
+									"key": "search",
+									"value": "Acme",
+									"description": "Search by company, email, or phone",
+									"disabled": true
+								},
+								{
+									"key": "has_duplicates",
+									"value": "true",
+									"description": "Filter by duplicate status (true/false)",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get paginated list of clients with optional search and filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Client",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company\": \"Acme Corporation\",\n    \"email\": \"contact@acme.com\",\n    \"phone\": \"+1-555-0123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients"
+							]
+						},
+						"description": "Create a new client. Triggers async duplicate detection."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Client",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{client_id}}"
+							]
+						},
+						"description": "Get single client by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Client",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company\": \"Acme Corporation Updated\",\n    \"email\": \"newemail@acme.com\",\n    \"phone\": \"+1-555-9999\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{client_id}}"
+							]
+						},
+						"description": "Update existing client. Triggers async duplicate detection."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Client",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{client_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{client_id}}"
+							]
+						},
+						"description": "Delete a client by ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Client Duplicates",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/{{client_id}}/duplicates",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"{{client_id}}",
+								"duplicates"
+							]
+						},
+						"description": "Get all duplicate clients for a specific client"
+					},
+					"response": []
+				}
+			],
+			"description": "Client CRUD operations and duplicate management"
+		},
+		{
+			"name": "Imports",
+			"item": [
+				{
+					"name": "Import CSV",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"description": "CSV file with columns: company, email, phone",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/clients/import",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"import"
+							]
+						},
+						"description": "Import clients from CSV. Small files (<10MB) process immediately, large files queue for async processing."
+					},
+					"response": []
+				},
+				{
+					"name": "List Imports",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/imports?page=1&per_page=15",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"imports"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "15"
+								}
+							]
+						},
+						"description": "Get paginated list of all imports with status"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Import Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/imports/{{import_id}}?page=1&per_page=50",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"imports",
+								"{{import_id}}"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "per_page",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get detailed import results with row-level status (success, failed, duplicate)"
+					},
+					"response": []
+				},
+				{
+					"name": "Export Import Log",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/imports/{{import_id}}/export",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"imports",
+								"{{import_id}}",
+								"export"
+							]
+						},
+						"description": "Export import details to CSV file (async for large imports)"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Import",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/imports/{{import_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"imports",
+								"{{import_id}}"
+							]
+						},
+						"description": "Delete an import record"
+					},
+					"response": []
+				}
+			],
+			"description": "CSV import operations and import log management"
+		},
+		{
+			"name": "Exports",
+			"item": [
+				{
+					"name": "Create New Export",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/export",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"export"
+							]
+						},
+						"description": "Create new client export. Small datasets (≤10K) export immediately, large datasets queue for async processing."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Exports",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/exports",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"exports"
+							]
+						},
+						"description": "Get list of all export files with metadata (filename, size, created_at)"
+					},
+					"response": []
+				},
+				{
+					"name": "Download Export",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/exports/{{filename}}/download",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"exports",
+								"{{filename}}",
+								"download"
+							]
+						},
+						"description": "Download specific export file (e.g., clients_2025-10-25_120926.csv)"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Export",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/exports/{{filename}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"exports",
+								"{{filename}}"
+							]
+						},
+						"description": "Delete an export file"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Export Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/clients/export/{{export_id}}/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"clients",
+								"export",
+								"{{export_id}}",
+								"status"
+							]
+						},
+						"description": "Check status of async export (queued/processing/completed)"
+					},
+					"response": []
+				}
+			],
+			"description": "Client export operations and export file management"
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000"
+		},
+		{
+			"key": "client_id",
+			"value": "1"
+		},
+		{
+			"key": "import_id",
+			"value": "1"
+		},
+		{
+			"key": "export_id",
+			"value": ""
+		},
+		{
+			"key": "filename",
+			"value": "clients_2025-10-25_120926.csv"
+		},
+		{
+			"key": "token",
+			"value": ""
+		}
+	]
+}
